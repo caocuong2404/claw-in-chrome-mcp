@@ -1,4 +1,4 @@
-# Claw in Chrome MCP
+#  Claw in Chrome MCP
 
 <div align="center">
 
@@ -9,7 +9,7 @@
 
 </div>
 
-`claw-in-chrome-mcp` 是一个面向 **Claw in Chrome** 扩展的 Node 20+ MCP 工具。
+`claw-in-chrome-mcp` 是一个面向 **Claw in Chrome** 扩展的 Node 20+ MCP 工具,从泄露的cc源码中提取得到。
 
 它提供独立的 `stdio` MCP server、本地 Native Messaging Host 安装能力，以及浏览器 / 扩展 / socket 诊断能力，可被任意 AI IDE 以标准 MCP `stdio` 方式启动。
 
@@ -30,11 +30,11 @@
 
 ## 配合目标
 
-当前版本面向的是 **Claw in Chrome 浏览器扩展**：
+本项目面向 **Claw in Chrome 浏览器扩展**：
 
 - 仓库地址：[S-Trespassing/claw-in-chrome](https://github.com/S-Trespassing/claw-in-chrome)
 
-当前 `claw-in-chrome` 仓库保留了与本项目兼容的扩展 ID 和 native host 协议，因此这套 MCP 包可以直接对接该 fork。若你后续修改了扩展 `key`、扩展 ID 或 native host 标识，请同步调整 MCP 侧配置。
+`claw-in-chrome` 仓库保留了与本项目兼容的扩展 ID 和 native host 协议，因此这套 MCP 包可以直接对接该 fork。若扩展侧修改了 `key`、扩展 ID 或 native host 标识，需要同步调整 MCP 侧配置。
 
 ## 安装
 
@@ -45,13 +45,13 @@ claw-in-chrome-mcp install-native-host
 
 安装完成后，CLI 会默认尝试自动打开 reconnect 页面。
 
-然后按下面顺序确认：
+安装后建议按以下顺序确认环境：
 
 1. 按 [S-Trespassing/claw-in-chrome](https://github.com/S-Trespassing/claw-in-chrome) 仓库说明安装并启用 Claw in Chrome 扩展
 2. 如果浏览器之前已经开着，完全退出并重启 Chromium 浏览器
 3. 运行 `claw-in-chrome-mcp doctor` 确认环境状态
 
-如果你是在源码目录里本地运行：
+源码目录本地运行方式：
 
 ```bash
 npm install
@@ -61,7 +61,7 @@ node dist/cli.js install-native-host
 
 ## 在 AI IDE 中接入
 
-发布后安装到全局环境时，可直接这样配置：
+全局安装后的 MCP 配置示例：
 
 ```json
 {
@@ -74,9 +74,9 @@ node dist/cli.js install-native-host
 }
 ```
 
-如果浏览器扩展暂时断开，`serve` 默认也会在后台尝试打开 reconnect 页面。你通常不需要先手动打开浏览器。
+浏览器扩展暂时断开时，`serve` 默认也会在后台尝试打开 reconnect 页面，通常无需预先手动打开浏览器。
 
-如果你是直接从源码目录运行，建议改成显式 `node + dist/cli.js`：
+源码目录运行时，可改为显式 `node + dist/cli.js`：
 
 ```json
 {
@@ -84,7 +84,7 @@ node dist/cli.js install-native-host
     "claw-in-chrome": {
       "command": "node",
       "args": [
-        "C:\\Users\\you\\path\\to\\claw-in-chrome-mcp\\dist\\cli.js",
+        "C:\\path\\to\\claw-in-chrome-mcp\\dist\\cli.js",
         "serve"
       ]
     }
@@ -109,9 +109,9 @@ claw-in-chrome-mcp --version
 - `--log-level` / `CIC_MCP_LOG_LEVEL`
 - `--auto-launch-browser <true|false>` / `CIC_MCP_AUTO_LAUNCH_BROWSER`
 - `--browser`：可重复传入 `chrome | edge | brave | chromium | arc | vivaldi | opera`
-- `CLAW_IN_CHROME_EXTENSION_IDS`：逗号分隔的扩展 ID 覆盖默认值；如果你的 `claw-in-chrome` fork 改了扩展 `key` 或扩展 ID，请用它手动对齐
+- `CLAW_IN_CHROME_EXTENSION_IDS`：逗号分隔的扩展 ID 覆盖默认值；如 `claw-in-chrome` fork 修改了扩展 `key` 或扩展 ID，可用该变量手动对齐
 
-`CIC_MCP_AUTO_LAUNCH_BROWSER` 默认等价于 `true`。如果你不希望 `serve` 或 `install-native-host` 自动尝试拉起浏览器，可以显式关闭：
+`CIC_MCP_AUTO_LAUNCH_BROWSER` 默认等价于 `true`。如需关闭 `serve` 或 `install-native-host` 的自动拉起浏览器行为，可显式设置：
 
 ```bash
 claw-in-chrome-mcp serve --auto-launch-browser false
@@ -123,26 +123,11 @@ claw-in-chrome-mcp serve --auto-launch-browser false
 export CIC_MCP_AUTO_LAUNCH_BROWSER=0
 ```
 
-## 发布说明
-
-执行 `npm pack` 或 `npm publish` 前，包会自动执行：
-
-1. `npm run clean`
-2. `npm run build`
-3. `npm test`
-
-这样可以避免旧的 `dist` 残留被一起打进 tarball。
-
-发布到 npm 时，请使用公开访问级别：
-
-```bash
-npm publish --access public
-```
-
 ## License
 
 MIT，详见 [LICENSE](./LICENSE)。
 
-## Star History
+##  Star 历史
 
-[![Star History Chart](https://api.star-history.com/svg?repos=S-Trespassing/claw-in-chrome&type=date&legend=top-left)](https://www.star-history.com/#S-Trespassing/claw-in-chrome&date)
+
+[![Star History Chart](https://api.star-history.com/svg?repos=S-Trespassing/claw-in-chrome-mcp&type=date&legend=top-left)](https://www.star-history.com/#S-Trespassing/claw-in-chrome-mcp&date)
