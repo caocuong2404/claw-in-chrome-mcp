@@ -1,0 +1,51 @@
+{
+  "name": "claw-in-chrome-mcp",
+  "version": "0.1.0",
+  "description": "Standalone stdio MCP server and native host for the Claw in Chrome browser extension",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "claw-in-chrome-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"import('node:fs/promises').then(fs => fs.rm('dist', { recursive: true, force: true }))\"",
+    "dev": "tsx src/cli.ts",
+    "prepack": "npm run clean && npm run build && npm test",
+    "test": "tsx --test tests/**/*.test.ts",
+    "smoke:help": "node dist/cli.js --help"
+  },
+  "keywords": [
+    "mcp",
+    "chrome",
+    "browser-automation",
+    "ai-ide",
+    "chrome-extension",
+    "native-messaging-host",
+    "stdio"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
