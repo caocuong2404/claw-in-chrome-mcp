@@ -3,7 +3,7 @@
 <div align="center">
 
 ![Claw in Chrome MCP](https://img.shields.io/badge/Claw-in%20Chrome%20MCP-blue?style=for-the-badge)
-![Version](https://img.shields.io/badge/version-0.1.0-green?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-0.1.1-green?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%2F%20Linux%20%2F%20Windows-lightgrey?style=for-the-badge)
 ![License](https://img.shields.io/badge/license-MIT-orange?style=for-the-badge)
 

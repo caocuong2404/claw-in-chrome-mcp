@@ -1,6 +1,7 @@
 import {
   chmod,
   mkdir,
+  readFile,
   readdir,
   rmdir,
   stat,
@@ -23,8 +24,18 @@ import {
 import { createLogger, jsonParse, jsonStringify } from './shared.js'
 import type { Logger } from './core/types.js'
 
-const VERSION = '0.1.0'
 const MAX_MESSAGE_SIZE = 1024 * 1024
+
+async function readPackageVersion(): Promise<string> {
+  try {
+    const packageJson = JSON.parse(
+      await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as { version?: string }
+    return packageJson.version ?? '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+}
 
 type ToolRequest = {
   method: string
@@ -232,7 +243,7 @@ export class ChromeNativeHost {
         sendChromeMessage(
           jsonStringify({
             type: 'status_response',
-            native_host_version: VERSION,
+            native_host_version: await readPackageVersion(),
           }),
         )
         break

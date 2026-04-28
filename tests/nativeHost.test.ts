@@ -79,6 +79,24 @@ test('cached binding is replayed to MCP clients that connect after the hello mes
   })
 })
 
+test('get_status reports the current package version', async () => {
+  const host = new ChromeNativeHost({}, createLogger('silent'))
+  const packageJson = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  ) as { version?: string }
+
+  const messages = await captureChromeStdoutMessages(async () => {
+    await host.handleMessage(JSON.stringify({ type: 'get_status' }))
+  })
+
+  assert.deepEqual(messages, [
+    {
+      type: 'status_response',
+      native_host_version: packageJson.version ?? '0.0.0',
+    },
+  ])
+})
+
 test('native host publishes runtime socket registration with browser binding metadata on windows', async () => {
   if (process.platform !== 'win32') {
     return
@@ -163,4 +181,34 @@ function withSilencedStdout<T>(fn: () => T): T {
   } finally {
     process.stdout.write = originalWrite as typeof process.stdout.write
   }
+}
+
+async function captureChromeStdoutMessages(
+  fn: () => Promise<void>,
+): Promise<unknown[]> {
+  const originalWrite = process.stdout.write.bind(process.stdout)
+  const chunks: Buffer[] = []
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    chunks.push(
+      typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : Buffer.from(chunk),
+    )
+    return true
+  }) as typeof process.stdout.write
+
+  try {
+    await fn()
+  } finally {
+    process.stdout.write = originalWrite as typeof process.stdout.write
+  }
+
+  const buffer = Buffer.concat(chunks)
+  const messages: unknown[] = []
+  let offset = 0
+  while (offset + 4 <= buffer.length) {
+    const length = buffer.readUInt32LE(offset)
+    offset += 4
+    messages.push(JSON.parse(buffer.subarray(offset, offset + length).toString('utf8')))
+    offset += length
+  }
+  return messages
 }

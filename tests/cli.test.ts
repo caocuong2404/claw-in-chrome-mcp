@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
+import { readFile } from 'node:fs/promises'
 import { mkdtemp, symlink } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -12,6 +13,14 @@ import {
   launchReconnectAfterInstall,
   resolveInstallReconnectBindingOverride,
 } from '../src/cli.ts'
+
+async function readPackageVersion(): Promise<string> {
+  const packageJsonPath = fileURLToPath(new URL('../package.json', import.meta.url))
+  const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
+    version?: string
+  }
+  return packageJson.version ?? '0.0.0'
+}
 
 test('resolveInstallReconnectBindingOverride only binds reconnect target when a single browser is selected', () => {
   assert.equal(resolveInstallReconnectBindingOverride(), null)
@@ -149,6 +158,6 @@ test('cli still runs when launched through a junction-style entry path', async t
 
   const [code] = await once(child, 'exit')
   assert.equal(code, 0)
-  assert.equal(stdout.trim(), '0.1.0')
+  assert.equal(stdout.trim(), await readPackageVersion())
   assert.equal(stderr, '')
 })
