@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
+import { resolve as resolvePath } from 'node:path'
 import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import process from 'node:process'
@@ -35,6 +36,32 @@ function readPackageVersion(): string {
   } catch {
     return '0.0.0'
   }
+}
+
+export function resolveInstallReconnectBindingOverride(
+  browsers?: ChromiumBrowser[],
+): { browser?: ChromiumBrowser } | null {
+  if (!browsers || browsers.length !== 1) {
+    return null
+  }
+
+  return {
+    browser: browsers[0],
+  }
+}
+
+export async function launchReconnectAfterInstall(options: {
+  browsers?: ChromiumBrowser[]
+  launchReconnectImpl?: typeof launchClawInChromeReconnect
+} = {}): Promise<boolean> {
+  const launchReconnectImpl =
+    options.launchReconnectImpl ?? launchClawInChromeReconnect
+
+  return launchReconnectImpl({
+    configuredBindingOverride: resolveInstallReconnectBindingOverride(
+      options.browsers,
+    ),
+  })
 }
 
 async function main(): Promise<void> {
@@ -77,13 +104,14 @@ async function main(): Promise<void> {
         'auto-launch-browser': { type: 'string' },
         browser: { type: 'string', multiple: true },
       })
+      const browsers = parseBrowsers(parsed.browser)
       const cliEntryPath = fileURLToPath(import.meta.url)
       const result = await installNativeHost({
         cliEntryPath,
         socketPath: getStringValue(parsed['socket-path']),
         socketDir: getStringValue(parsed['socket-dir']),
         logLevel: getStringValue(parsed['log-level']),
-        browsers: parseBrowsers(parsed.browser),
+        browsers,
       })
       process.stdout.write(`Wrapper: ${result.wrapperPath}\n`)
       for (const manifestPath of result.manifestPaths) {
@@ -99,7 +127,9 @@ async function main(): Promise<void> {
           getBooleanValue(parsed['auto-launch-browser'], '--auto-launch-browser'),
         )
       ) {
-        const launched = await launchClawInChromeReconnect()
+        const launched = await launchReconnectAfterInstall({
+          browsers,
+        })
         process.stdout.write(
           `Reconnect: ${
             launched
@@ -254,7 +284,32 @@ function printHelp(): void {
   )
 }
 
-main().catch(error => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
-  process.exit(1)
-})
+function isDirectExecution(currentModuleUrl: string): boolean {
+  const argvEntry = process.argv[1]
+  if (!argvEntry) {
+    return false
+  }
+
+  const normalize = (value: string): string => {
+    const resolved = resolvePath(value)
+    const canonical = resolveRealPath(resolved)
+    return process.platform === 'win32' ? canonical.toLowerCase() : canonical
+  }
+
+  return normalize(fileURLToPath(currentModuleUrl)) === normalize(argvEntry)
+}
+
+function resolveRealPath(value: string): string {
+  try {
+    return realpathSync.native(value)
+  } catch {
+    return value
+  }
+}
+
+if (isDirectExecution(import.meta.url)) {
+  main().catch(error => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    process.exit(1)
+  })
+}

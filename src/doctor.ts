@@ -15,7 +15,7 @@ import {
   getAllNativeMessagingHostsDirs,
   getAllSocketPaths,
   getAllWindowsRegistryKeys,
-  getSecureSocketPath,
+  getSocketDiscoveryPattern,
 } from './browser.js'
 import {
   getDefaultWrapperDir,
@@ -158,7 +158,7 @@ export async function collectDoctorReport(
       registryEntries,
     },
     socket: {
-      expectedPath: getSecureSocketPath(options),
+      expectedPath: getSocketDiscoveryPattern(options),
       discoveredPaths: socketPaths,
       connectablePaths,
     },

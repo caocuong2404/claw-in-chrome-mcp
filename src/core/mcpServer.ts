@@ -5,6 +5,11 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import {
+  BROWSER_BINDING_NOTIFICATION_METHOD,
+  rememberRuntimeBrowserBinding,
+  type RuntimeBrowserBinding,
+} from "../browser.js";
 import { BROWSER_TOOLS } from "./browserTools.js";
 import { createMcpSocketClient } from "./mcpSocketClient.js";
 import { createMcpSocketPool } from "./mcpSocketPool.js";
@@ -68,6 +73,24 @@ export function createClawInChromeMcpServer(
   );
 
   socketClient.setNotificationHandler((notification) => {
+    if (notification.method === BROWSER_BINDING_NOTIFICATION_METHOD) {
+      logger.info(
+        `[${serverName}] Persisting internal browser binding notification`,
+      );
+      // 绑定通知属于控制面事件：收到后立刻落盘，后续 reconnect 才能显式回到正确 profile。
+      void rememberRuntimeBrowserBinding(
+        notification.params as RuntimeBrowserBinding,
+        {
+          log: (message) => logger.info(message),
+        },
+      ).catch((error) => {
+        logger.info(
+          `[${serverName}] Failed to persist browser binding: ${error.message}`,
+        );
+      });
+      return;
+    }
+
     logger.info(
       `[${serverName}] Forwarding MCP notification: ${notification.method}`,
     );

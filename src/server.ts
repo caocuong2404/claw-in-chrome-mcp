@@ -222,6 +222,9 @@ export async function runStdioServer(options: ServeOptions = {}): Promise<void> 
 
   process.stdin.on('end', () => void shutdownAndExit())
   process.stdin.on('error', () => void shutdownAndExit())
+  // 让 stdio 服务在客户端首条消息到达前也保持存活，避免 Windows / Electron
+  // 在 stdin 仍然打开但尚未进入 flowing 模式时让进程过早退出。
+  process.stdin.resume()
 
   context.logger.info('[server] starting stdio MCP server')
   void maybeAutoLaunchBrowserOnStartup(options, {

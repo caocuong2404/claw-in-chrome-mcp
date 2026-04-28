@@ -16,6 +16,7 @@ import type { ClawInChromeContext } from "./types.js";
 export class McpSocketPool {
   private clients: Map<string, McpSocketClient> = new Map();
   private tabRoutes: Map<number, string> = new Map();
+  private preferredSocketPath: string | null = null;
   private context: ClawInChromeContext;
   private notificationHandler:
     | ((notification: { method: string; params?: Record<string, unknown> }) => void)
@@ -32,8 +33,8 @@ export class McpSocketPool {
     }) => void,
   ): void {
     this.notificationHandler = handler;
-    for (const client of this.clients.values()) {
-      client.setNotificationHandler(handler);
+    for (const [socketPath, client] of this.clients.entries()) {
+      this.attachClientNotificationHandler(socketPath, client);
     }
   }
 
@@ -88,20 +89,19 @@ export class McpSocketPool {
       if (socketPath) {
         const client = this.clients.get(socketPath);
         if (client?.isConnected()) {
+          this.preferredSocketPath = socketPath;
           return client.callTool(name, args);
         }
       }
       // Tab route not found or client disconnected — fall through to any connected
     }
 
-    // Fallback: use first connected client
-    const connected = this.getConnectedClients();
-    if (connected.length === 0) {
-      throw new SocketConnectionError(
-        `[${this.context.serverName}] No connected sockets available`,
-      );
+    const fallbackClient = this.getPreferredConnectedClient();
+    if (!fallbackClient) {
+      throw new SocketConnectionError(this.getNoSocketErrorMessage());
     }
-    return connected[0]!.callTool(name, args);
+
+    return fallbackClient.callTool(name, args);
   }
 
   public isConnected(): boolean {
@@ -131,15 +131,41 @@ export class McpSocketPool {
     const connected = this.getConnectedClients();
 
     if (connected.length === 0) {
-      throw new SocketConnectionError(
-        `[${serverName}] No connected sockets available`,
-      );
+      throw new SocketConnectionError(this.getNoSocketErrorMessage());
     }
+
+    const shouldCreateIfEmpty = args.createIfEmpty === true;
 
     // If only one client, skip merging overhead
     if (connected.length === 1) {
       const result = await connected[0]!.callTool("tabs_context_mcp", args);
-      this.updateTabRoutes(result, this.getSocketPathForClient(connected[0]!));
+      const socketPath = this.getSocketPathForClient(connected[0]!);
+      this.tabRoutes.clear();
+      this.updateTabRoutes(result, socketPath);
+      if (this.hasTabs(result)) {
+        this.preferredSocketPath = socketPath;
+      }
+      return result;
+    }
+
+    if (shouldCreateIfEmpty) {
+      const existingContext = await this.callTabsContextWithoutCreating(connected);
+      if (existingContext) {
+        return existingContext;
+      }
+
+      const targetSocketPath = this.getPreferredSocketPath(connected);
+      const targetClient = this.clients.get(targetSocketPath);
+      if (!targetClient?.isConnected()) {
+        throw new SocketConnectionError(this.getNoSocketErrorMessage());
+      }
+
+      const result = await targetClient.callTool("tabs_context_mcp", args);
+      this.tabRoutes.clear();
+      this.updateTabRoutes(result, targetSocketPath);
+      if (this.hasTabs(result)) {
+        this.preferredSocketPath = targetSocketPath;
+      }
       return result;
     }
 
@@ -155,6 +181,8 @@ export class McpSocketPool {
     // Merge tab results
     const mergedTabs: unknown[] = [];
     this.tabRoutes.clear();
+    const socketsWithTabs = new Set<string>();
+    const successfulSocketPaths: string[] = [];
 
     for (const settledResult of results) {
       if (settledResult.status !== "fulfilled") {
@@ -165,13 +193,23 @@ export class McpSocketPool {
       }
 
       const { result, socketPath } = settledResult.value;
+      successfulSocketPaths.push(socketPath);
       this.updateTabRoutes(result, socketPath);
 
       const tabs = this.extractTabs(result);
       if (tabs) {
+        if (tabs.length > 0) {
+          socketsWithTabs.add(socketPath);
+        }
         mergedTabs.push(...tabs);
       }
     }
+
+    this.updatePreferredSocketAfterTabsContext(
+      socketsWithTabs,
+      successfulSocketPaths,
+      connected,
+    );
 
     // Return merged result in the same format as the extension response
     if (mergedTabs.length > 0) {
@@ -223,6 +261,150 @@ export class McpSocketPool {
         this.tabRoutes.set(tabId, socketPath);
       }
     }
+  }
+
+  private hasTabs(result: unknown): boolean {
+    const tabs = this.extractTabs(result);
+    return Array.isArray(tabs) && tabs.length > 0;
+  }
+
+  private getPreferredConnectedClient(): McpSocketClient | null {
+    const connected = this.getConnectedClients();
+    if (connected.length === 0) {
+      return null;
+    }
+
+    const preferredSocketPath = this.getPreferredSocketPath(connected);
+    const preferredClient = this.clients.get(preferredSocketPath);
+    if (preferredClient?.isConnected()) {
+      return preferredClient;
+    }
+
+    return connected[0] ?? null;
+  }
+
+  private getPreferredSocketPath(connected: McpSocketClient[]): string {
+    if (this.preferredSocketPath) {
+      const preferredClient = this.clients.get(this.preferredSocketPath);
+      if (preferredClient?.isConnected()) {
+        return this.preferredSocketPath;
+      }
+    }
+
+    return this.getSocketPathForClient(connected[0]!);
+  }
+
+  private async callTabsContextWithoutCreating(
+    connected: McpSocketClient[],
+  ): Promise<unknown | null> {
+    const { logger, serverName } = this.context;
+    this.tabRoutes.clear();
+    const results = await Promise.allSettled(
+      connected.map(async (client) => {
+        const result = await client.callTool("tabs_context_mcp", {
+          createIfEmpty: false,
+        });
+        const socketPath = this.getSocketPathForClient(client);
+        return { result, socketPath };
+      }),
+    );
+
+    const mergedTabs: unknown[] = [];
+    const socketsWithTabs = new Set<string>();
+    const successfulSocketPaths: string[] = [];
+
+    for (const settledResult of results) {
+      if (settledResult.status !== "fulfilled") {
+        logger.info(
+          `[${serverName}] tabs_context_mcp preflight failed on one socket: ${settledResult.reason}`,
+        );
+        continue;
+      }
+
+      const { result, socketPath } = settledResult.value;
+      successfulSocketPaths.push(socketPath);
+      this.updateTabRoutes(result, socketPath);
+
+      const tabs = this.extractTabs(result);
+      if (tabs) {
+        if (tabs.length > 0) {
+          socketsWithTabs.add(socketPath);
+        }
+        mergedTabs.push(...tabs);
+      }
+    }
+
+    this.updatePreferredSocketAfterTabsContext(
+      socketsWithTabs,
+      successfulSocketPaths,
+      connected,
+    );
+
+    if (mergedTabs.length === 0) {
+      return null;
+    }
+
+    const tabListText = mergedTabs
+      .map((t) => {
+        const tab = t as { tabId: number; title: string; url: string };
+        return `  • tabId ${tab.tabId}: "${tab.title}" (${tab.url})`;
+      })
+      .join("\n");
+
+    return {
+      result: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ availableTabs: mergedTabs }),
+          },
+          {
+            type: "text",
+            text: `\n\nTab Context:\n- Available tabs:\n${tabListText}`,
+          },
+        ],
+      },
+    };
+  }
+
+  private updatePreferredSocketAfterTabsContext(
+    socketsWithTabs: Set<string>,
+    successfulSocketPaths: string[],
+    connected: McpSocketClient[],
+  ): void {
+    if (
+      this.preferredSocketPath &&
+      socketsWithTabs.has(this.preferredSocketPath)
+    ) {
+      return;
+    }
+
+    if (socketsWithTabs.size === 1) {
+      this.preferredSocketPath = [...socketsWithTabs][0] ?? null;
+      return;
+    }
+
+    if (socketsWithTabs.size > 1) {
+      const nextPreferredSocketPath = successfulSocketPaths.find((socketPath) =>
+        socketsWithTabs.has(socketPath),
+      );
+      this.preferredSocketPath = nextPreferredSocketPath ?? null;
+      return;
+    }
+
+    if (
+      this.preferredSocketPath &&
+      successfulSocketPaths.includes(this.preferredSocketPath)
+    ) {
+      return;
+    }
+
+    if (successfulSocketPaths.length > 0) {
+      this.preferredSocketPath = successfulSocketPaths[0] ?? null;
+      return;
+    }
+
+    this.preferredSocketPath = null;
   }
 
   private extractTabs(result: unknown): unknown[] | null {
@@ -278,9 +460,7 @@ export class McpSocketPool {
         };
         const client = createMcpSocketClient(clientContext);
         client.disableAutoReconnect = true;
-        if (this.notificationHandler) {
-          client.setNotificationHandler(this.notificationHandler);
-        }
+        this.attachClientNotificationHandler(path, client);
         this.clients.set(path, client);
       }
     }
@@ -291,17 +471,44 @@ export class McpSocketPool {
         logger.info(`[${serverName}] Removing stale socket from pool: ${path}`);
         client.disconnect();
         this.clients.delete(path);
-        for (const [tabId, socketPath] of this.tabRoutes.entries()) {
-          if (socketPath === path) {
-            this.tabRoutes.delete(tabId);
-          }
+        if (this.preferredSocketPath === path) {
+          this.preferredSocketPath = null;
         }
+        this.dropSocketRoutesForSocket(path);
       }
     }
   }
 
   private getAvailableSocketPaths(): string[] {
     return this.context.getSocketPaths?.() ?? [];
+  }
+
+  private attachClientNotificationHandler(
+    socketPath: string,
+    client: McpSocketClient,
+  ): void {
+    client.setNotificationHandler((notification) => {
+      this.handleClientNotification(socketPath, notification);
+    });
+  }
+
+  private handleClientNotification(
+    _socketPath: string,
+    notification: { method: string; params?: Record<string, unknown> },
+  ): void {
+    this.notificationHandler?.(notification);
+  }
+
+  private dropSocketRoutesForSocket(socketPath: string): void {
+    for (const [tabId, routedSocketPath] of this.tabRoutes.entries()) {
+      if (routedSocketPath === socketPath) {
+        this.tabRoutes.delete(tabId);
+      }
+    }
+  }
+
+  private getNoSocketErrorMessage(): string {
+    return `[${this.context.serverName}] No connected sockets available`;
   }
 }
 

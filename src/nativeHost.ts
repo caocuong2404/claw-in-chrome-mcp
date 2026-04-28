@@ -10,7 +10,16 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { platform } from 'node:os'
 import { join } from 'node:path'
 
-import { type SocketOptions, getSecureSocketPath, getSocketDir } from './browser.js'
+import {
+  BROWSER_BINDING_HELLO_TYPE,
+  BROWSER_BINDING_NOTIFICATION_METHOD,
+  removeRuntimeSocketRegistration,
+  type RuntimeBrowserBinding,
+  type SocketOptions,
+  getSecureSocketPath,
+  getSocketDir,
+  writeRuntimeSocketRegistration,
+} from './browser.js'
 import { createLogger, jsonParse, jsonStringify } from './shared.js'
 import type { Logger } from './core/types.js'
 
@@ -20,6 +29,11 @@ const MAX_MESSAGE_SIZE = 1024 * 1024
 type ToolRequest = {
   method: string
   params?: unknown
+}
+
+type NotificationPayload = {
+  method: string
+  params?: Record<string, unknown>
 }
 
 type McpClient = {
@@ -61,11 +75,12 @@ export async function runChromeNativeHost(
   await host.stop()
 }
 
-class ChromeNativeHost {
+export class ChromeNativeHost {
   private readonly clients = new Map<number, McpClient>()
   private readonly logger: Logger
   private readonly options: SocketOptions
   private nextClientId = 1
+  private runtimeBinding: RuntimeBrowserBinding | null = null
   private server: Server | null = null
   private running = false
   private socketPath: string | null = null
@@ -130,6 +145,8 @@ class ChromeNativeHost {
     if (platform() !== 'win32') {
       await chmod(this.socketPath!, 0o600).catch(() => undefined)
     }
+
+    await this.persistRuntimeSocketRegistration()
   }
 
   async stop(): Promise<void> {
@@ -162,6 +179,8 @@ class ChromeNativeHost {
       }
     }
 
+    await removeRuntimeSocketRegistration(this.options).catch(() => undefined)
+
     this.running = false
   }
 
@@ -191,6 +210,16 @@ class ChromeNativeHost {
     }
 
     switch (message.type) {
+      case BROWSER_BINDING_HELLO_TYPE: {
+        // 把浏览器实例上报的绑定元数据缓存下来；后到达的 MCP 客户端也要能拿到。
+        this.runtimeBinding = sanitizeRuntimeBrowserBinding(message)
+        await this.persistRuntimeSocketRegistration()
+        this.broadcastMcpNotification(
+          BROWSER_BINDING_NOTIFICATION_METHOD,
+          this.runtimeBinding,
+        )
+        break
+      }
       case 'ping':
         sendChromeMessage(
           jsonStringify({
@@ -210,13 +239,7 @@ class ChromeNativeHost {
       case 'tool_response':
       case 'notification': {
         const { type: _ignored, ...payload } = message
-        const bytes = Buffer.from(jsonStringify(payload), 'utf-8')
-        const header = Buffer.alloc(4)
-        header.writeUInt32LE(bytes.length, 0)
-        const framed = Buffer.concat([header, bytes])
-        for (const client of this.clients.values()) {
-          client.socket.write(framed)
-        }
+        this.broadcastSocketPayload(payload)
         break
       }
       default:
@@ -239,6 +262,7 @@ class ChromeNativeHost {
 
     this.clients.set(clientId, client)
     sendChromeMessage(jsonStringify({ type: 'mcp_connected' }))
+    this.sendCurrentBindingToClient(client)
 
     socket.on('data', (data: Buffer) => {
       client.buffer = Buffer.concat([client.buffer, data])
@@ -277,6 +301,52 @@ class ChromeNativeHost {
 
     socket.on('error', error => {
       this.logger.error('[native-host] MCP client error: %s', error.message)
+    })
+  }
+
+  private sendCurrentBindingToClient(client: McpClient): void {
+    if (!this.runtimeBinding) {
+      return
+    }
+
+    this.sendSocketPayload(client, {
+      method: BROWSER_BINDING_NOTIFICATION_METHOD,
+      params: this.runtimeBinding as Record<string, unknown>,
+    })
+  }
+
+  private broadcastMcpNotification(
+    method: string,
+    params?: RuntimeBrowserBinding,
+  ): void {
+    this.broadcastSocketPayload({
+      method,
+      params: params as Record<string, unknown> | undefined,
+    })
+  }
+
+  private broadcastSocketPayload(payload: NotificationPayload | Record<string, unknown>): void {
+    const framed = frameSocketPayload(payload)
+    for (const client of this.clients.values()) {
+      client.socket.write(framed)
+    }
+  }
+
+  private sendSocketPayload(
+    client: McpClient,
+    payload: NotificationPayload | Record<string, unknown>,
+  ): void {
+    client.socket.write(frameSocketPayload(payload))
+  }
+
+  private async persistRuntimeSocketRegistration(): Promise<void> {
+    if (!this.socketPath) {
+      return
+    }
+
+    await writeRuntimeSocketRegistration(this.socketPath, {
+      ...this.options,
+      runtimeBinding: this.runtimeBinding,
     })
   }
 }
@@ -351,4 +421,38 @@ function isChromeMessage(
   value: unknown,
 ): value is { type: string; [key: string]: unknown } {
   return typeof value === 'object' && value !== null && 'type' in value && typeof value.type === 'string'
+}
+
+function frameSocketPayload(payload: NotificationPayload | Record<string, unknown>): Buffer {
+  const bytes = Buffer.from(jsonStringify(payload), 'utf-8')
+  const header = Buffer.alloc(4)
+  header.writeUInt32LE(bytes.length, 0)
+  return Buffer.concat([header, bytes])
+}
+
+function sanitizeRuntimeBrowserBinding(
+  message: { [key: string]: unknown },
+): RuntimeBrowserBinding {
+  const protocolVersion =
+    typeof message.protocolVersion === 'number' && Number.isFinite(message.protocolVersion)
+      ? message.protocolVersion
+      : undefined
+
+  return {
+    protocolVersion,
+    browser: sanitizeOptionalString(message.browser),
+    extensionId: sanitizeOptionalString(message.extensionId),
+    extensionVersion: sanitizeOptionalString(message.extensionVersion),
+    hostName: sanitizeOptionalString(message.hostName),
+    instanceId: sanitizeOptionalString(message.instanceId),
+  }
+}
+
+function sanitizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined
+  }
+
+  const normalized = value.trim()
+  return normalized.length > 0 ? normalized : undefined
 }

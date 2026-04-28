@@ -27,6 +27,7 @@ test('doctor reports healthy overridden environment', async () => {
     DEFAULT_EXTENSION_IDS[0]!,
     '1.0.0',
   )
+  const extensionManifestPath = join(extensionPath, 'manifest.json')
   const wrapperPath = join(tempRoot, 'bin', process.platform === 'win32' ? 'chrome-native-host.bat' : 'chrome-native-host')
   const manifestPath = join(tempRoot, 'manifest', NATIVE_HOST_MANIFEST_NAME)
   const socketPath = join(tempRoot, 'socket')
@@ -34,6 +35,7 @@ test('doctor reports healthy overridden environment', async () => {
   await mkdir(extensionPath, { recursive: true })
   await mkdir(join(tempRoot, 'bin'), { recursive: true })
   await mkdir(join(tempRoot, 'manifest'), { recursive: true })
+  await writeExtensionManifest(extensionManifestPath, '1.0.0')
   await writeFile(wrapperPath, 'echo host', 'utf8')
   await writeFile(manifestPath, buildNativeHostManifest(wrapperPath), 'utf8')
 
@@ -77,6 +79,7 @@ test('doctor only checks the extension browser on windows by default', async () 
     DEFAULT_EXTENSION_IDS[0]!,
     '1.0.0',
   )
+  const extensionManifestPath = join(extensionPath, 'manifest.json')
   const wrapperPath = join(
     tempRoot,
     'bin',
@@ -88,6 +91,7 @@ test('doctor only checks the extension browser on windows by default', async () 
   await mkdir(edgePath.path, { recursive: true })
   await mkdir(join(tempRoot, 'bin'), { recursive: true })
   await mkdir(join(tempRoot, 'manifest'), { recursive: true })
+  await writeExtensionManifest(extensionManifestPath, '1.0.0')
   await writeFile(wrapperPath, 'echo host', 'utf8')
   await writeFile(manifestPath, buildNativeHostManifest(wrapperPath), 'utf8')
 
@@ -108,3 +112,19 @@ test('doctor only checks the extension browser on windows by default', async () 
     },
   ])
 })
+
+async function writeExtensionManifest(path: string, version: string): Promise<void> {
+  await writeFile(
+    path,
+    JSON.stringify(
+      {
+        manifest_version: 3,
+        name: 'Claw in Chrome',
+        version,
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+}
